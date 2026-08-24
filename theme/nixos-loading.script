@@ -2,19 +2,13 @@
 # Animation: "NixOS" text with the 6 lambda arms of the snowflake
 # appearing one-by-one then disappearing one-by-one, looping continuously.
 #
-# Uses pre-composed animation frames (frame-0.png … frame-12.png).
+# Uses pre-composed animation frames (frame-0.png … frame-36.png).
 
 # -------------------------------------------------------------------
 # Background — dark gradient
 # -------------------------------------------------------------------
 Window.SetBackgroundTopColor(0.10, 0.10, 0.14);
 Window.SetBackgroundBottomColor(0.06, 0.06, 0.10);
-
-# -------------------------------------------------------------------
-# Screen geometry
-# -------------------------------------------------------------------
-screen_width  = Window.GetWidth();
-screen_height = Window.GetHeight();
 
 # -------------------------------------------------------------------
 # Load animation frames
@@ -24,16 +18,67 @@ NUM_FRAMES = 37;
 for (i = 0; i < NUM_FRAMES; i++)
     frame_image[i] = Image("frame-" + i + ".png");
 
-# -------------------------------------------------------------------
-# Frame sprite — centered on screen
-# -------------------------------------------------------------------
 frame_width  = frame_image[0].GetWidth();
 frame_height = frame_image[0].GetHeight();
 
+# -------------------------------------------------------------------
+# Sprites
+# -------------------------------------------------------------------
 frame_sprite = Sprite(frame_image[0]);
-frame_sprite.SetX(screen_width  / 2 - frame_width  / 2);
-frame_sprite.SetY(screen_height / 2 - frame_height / 2);
 frame_sprite.SetOpacity(1);
+
+message_sprite = Sprite();
+message_sprite.SetOpacity(0);
+
+prompt_sprite = Sprite();
+prompt_sprite.SetOpacity(0);
+
+bullets_sprite = Sprite();
+bullets_sprite.SetOpacity(0);
+
+# Text images currently held by the sprites (0 while unused)
+message_image = 0;
+prompt_image  = 0;
+bullets_image = 0;
+
+# Vertical offsets from the logo / screen edge
+MESSAGE_BOTTOM_GAP = 50;
+PROMPT_GAP         = 30;
+BULLETS_GAP        = 65;
+
+# -------------------------------------------------------------------
+# Layout — must be recomputed, never cached.
+# Plymouth rebuilds its virtual canvas (and re-centers every display
+# inside it) whenever a display is added, removed or changes mode, so
+# coordinates read once at startup go stale mid-boot.
+# -------------------------------------------------------------------
+fun layout() {
+    width  = Window.GetWidth();
+    height = Window.GetHeight();
+    center_x = Window.GetX() + width / 2;
+    center_y = Window.GetY() + height / 2;
+    logo_bottom = center_y + frame_height / 2;
+
+    frame_sprite.SetX(center_x - frame_width / 2);
+    frame_sprite.SetY(center_y - frame_height / 2);
+
+    if (message_image) {
+        message_sprite.SetX(center_x - message_image.GetWidth() / 2);
+        message_sprite.SetY(Window.GetY() + height - MESSAGE_BOTTOM_GAP);
+    }
+
+    if (prompt_image) {
+        prompt_sprite.SetX(center_x - prompt_image.GetWidth() / 2);
+        prompt_sprite.SetY(logo_bottom + PROMPT_GAP);
+    }
+
+    if (bullets_image) {
+        bullets_sprite.SetX(center_x - bullets_image.GetWidth() / 2);
+        bullets_sprite.SetY(logo_bottom + BULLETS_GAP);
+    }
+}
+
+layout();
 
 # -------------------------------------------------------------------
 # Animation state
@@ -48,6 +93,8 @@ TICKS_PER_STEP = 2;
 # Refresh callback — cycle through frames
 # -------------------------------------------------------------------
 fun refresh_callback() {
+    layout();
+
     tick++;
     if (tick < TICKS_PER_STEP)
         return;
@@ -64,18 +111,15 @@ Plymouth.SetRefreshFunction(refresh_callback);
 # -------------------------------------------------------------------
 # Message callback — display text near bottom of screen
 # -------------------------------------------------------------------
-message_sprite = Sprite();
-message_sprite.SetOpacity(0);
-
 fun message_callback(text) {
-    if (text == "")
+    if (text == "") {
+        message_image = 0;
         message_sprite.SetOpacity(0);
-    else {
-        msg_image = Image.Text(text, 1, 1, 1);
-        message_sprite.SetImage(msg_image);
-        message_sprite.SetX(screen_width / 2 - msg_image.GetWidth() / 2);
-        message_sprite.SetY(screen_height - 50);
+    } else {
+        message_image = Image.Text(text, 1, 1, 1);
+        message_sprite.SetImage(message_image);
         message_sprite.SetOpacity(1);
+        layout();
     }
 }
 
@@ -84,10 +128,6 @@ Plymouth.SetMessageFunction(message_callback);
 # -------------------------------------------------------------------
 # Password callback (LUKS / login) — bullets, never plaintext
 # -------------------------------------------------------------------
-prompt_sprite  = Sprite();
-prompt_sprite.SetOpacity(0);
-bullets_sprite = Sprite();
-bullets_sprite.SetOpacity(0);
 
 # Frame index for fully visible logo (all 6 lambdas shown)
 FULL_LOGO_FRAME = 18;
@@ -96,26 +136,23 @@ fun password_callback(prompt, bullets) {
     # Show the full logo while waiting for a password
     frame_sprite.SetImage(frame_image[FULL_LOGO_FRAME]);
 
-    # Prompt label
     prompt_image = Image.Text(prompt, 1, 1, 1);
     prompt_sprite.SetImage(prompt_image);
-    prompt_sprite.SetX(screen_width / 2 - prompt_image.GetWidth() / 2);
-    prompt_sprite.SetY(screen_height / 2 + frame_height / 2 + 30);
     prompt_sprite.SetOpacity(1);
 
-    # Bullet characters
     if (bullets > 0) {
         bullet_string = "";
         for (i = 0; i < bullets; i++)
             bullet_string = bullet_string + "●";
-        bullet_image = Image.Text(bullet_string, 0.75, 0.84, 0.96);
-        bullets_sprite.SetImage(bullet_image);
-        bullets_sprite.SetX(screen_width / 2 - bullet_image.GetWidth() / 2);
-        bullets_sprite.SetY(screen_height / 2 + frame_height / 2 + 65);
+        bullets_image = Image.Text(bullet_string, 0.75, 0.84, 0.96);
+        bullets_sprite.SetImage(bullets_image);
         bullets_sprite.SetOpacity(1);
     } else {
+        bullets_image = 0;
         bullets_sprite.SetOpacity(0);
     }
+
+    layout();
 }
 
 Plymouth.SetDisplayPasswordFunction(password_callback);
@@ -124,6 +161,8 @@ Plymouth.SetDisplayPasswordFunction(password_callback);
 # Return to normal mode — hide password UI
 # -------------------------------------------------------------------
 fun display_normal_callback() {
+    prompt_image  = 0;
+    bullets_image = 0;
     prompt_sprite.SetOpacity(0);
     bullets_sprite.SetOpacity(0);
 }

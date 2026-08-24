@@ -90,6 +90,7 @@ sudo plymouth quit
 2. **Build**: `rsvg-convert` rasterizes each SVG to PNG at build time (lambdas at 512 px, text at 256 px)
 3. **Animation**: Plymouth script shows "NixOS" text immediately, then fades in each lambda arm over its 1/6 progress segment (clockwise from top-left: 120° → 180° → 240° → 300° → 0° → 60°)
 4. **Password prompt** (LUKS): displays the full logo with `●` bullet-masked input
+5. **Layout**: geometry is re-read from `Window.Get*` on every refresh tick, never cached — Plymouth rebuilds its virtual canvas (and re-centers each display in it) whenever a monitor is added, removed or changes mode, so cached coordinates would leave the logo offset on every screen
 
 ## License
 

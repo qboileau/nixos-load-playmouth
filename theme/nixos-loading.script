@@ -1,8 +1,11 @@
 # NixOS Loading Plymouth Theme
-# Animation: "NixOS" text with the 6 lambda arms of the snowflake
-# appearing one-by-one then disappearing one-by-one, looping continuously.
+# Animation: the "NixOS" wordmark under a looping snowflake animation —
+# the 6 lambda arms appearing and disappearing one-by-one ("reveal" variants),
+# or the whole logo spinning as ASCII art ("spin" variant).
 #
-# Uses pre-composed animation frames (frame-0.png … frame-36.png).
+# Uses pre-composed animation frames (frame-0.png … frame-<NUM_FRAMES - 1>.png).
+# The @…@ placeholders below are per-variant values from variants.json,
+# substituted when the theme is installed.
 
 # -------------------------------------------------------------------
 # Background — dark gradient
@@ -13,7 +16,7 @@ Window.SetBackgroundBottomColor(0.06, 0.06, 0.10);
 # -------------------------------------------------------------------
 # Load animation frames
 # -------------------------------------------------------------------
-NUM_FRAMES = 37;
+NUM_FRAMES = @num_frames@;
 
 for (i = 0; i < NUM_FRAMES; i++)
     frame_image[i] = Image("frame-" + i + ".png");
@@ -86,8 +89,8 @@ layout();
 progress = 0;
 tick = 0;
 
-# Hold each frame for multiple refresh ticks to slow the animation.
-TICKS_PER_STEP = 2;
+# Hold each frame for this many refresh ticks (Plymouth refreshes at 50 Hz).
+TICKS_PER_STEP = @ticks_per_step@;
 
 # -------------------------------------------------------------------
 # Refresh callback — cycle through frames
@@ -129,8 +132,9 @@ Plymouth.SetMessageFunction(message_callback);
 # Password callback (LUKS / login) — bullets, never plaintext
 # -------------------------------------------------------------------
 
-# Frame index for fully visible logo (all 6 lambdas shown)
-FULL_LOGO_FRAME = 18;
+# Frame index showing the complete logo — the last revealed lambda for the
+# reveal variants, any frame for the spin variant.
+FULL_LOGO_FRAME = @full_logo_frame@;
 
 fun password_callback(prompt, bullets) {
     # Show the full logo while waiting for a password

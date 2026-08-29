@@ -12,13 +12,17 @@ opacity for smooth animation. The animation cycle is:
 The resulting PNGs are stored in frames/<variant>/ and committed to the
 repository so the theme can be packaged without build-time SVG tooling.
 
+Covers the "reveal" variants of variants.json; the "spin" one is composed by
+generate-spin-frames.py instead.
+
 Usage:
-    ./generate-frames.py                        # all variants
+    ./generate-frames.py                        # all reveal variants
     ./generate-frames.py default                # single variant
     ./generate-frames.py /path/to/logo.svg out/ # raw split+rasterize+compose mode
 """
 
 import copy
+import json
 import os
 import shutil
 import subprocess
@@ -49,11 +53,16 @@ FADE_STEPS = 3
 # Total frames: 1 (base) + 6 * FADE_STEPS (appear) + 6 * FADE_STEPS (disappear)
 NUM_FRAMES = 1 + 12 * FADE_STEPS
 
-SOURCE_SVGS = {
-    "default": "nixos-logo-default-gradient-white-regular-vertical-recommended.svg",
-    "rainbow": "nixos-logo-rainbow-gradient-white-regular-vertical-recommended.svg",
-    "white": "nixos-logo-white-flat-white-regular-vertical-recommended.svg",
-}
+STYLE = "reveal"
+
+VARIANTS = json.load(open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "variants.json")))
+SOURCE_SVGS = {name: v["svg"] for name, v in VARIANTS.items() if v["style"] == STYLE}
+
+for name, variant in VARIANTS.items():
+    if variant["style"] == STYLE and variant["numFrames"] != NUM_FRAMES:
+        sys.exit(f"Error: variants.json says {name} has {variant['numFrames']} "
+                 f"frames, this script composes {NUM_FRAMES}.")
 
 
 def _make_svg(viewbox: str) -> ET.Element:

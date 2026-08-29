@@ -1,0 +1,38 @@
+{
+  "default": {
+    "svg": "nixos-logo-default-gradient-white-regular-vertical-recommended.svg",
+    "style": "reveal",
+    "numFrames": 37,
+    "ticksPerStep": 2,
+    "fullLogoFrame": 18,
+    "previewDelay": 7,
+    "description": "progressive lambda reveal (blue gradient)"
+  },
+  "rainbow": {
+    "svg": "nixos-logo-rainbow-gradient-white-regular-vertical-recommended.svg",
+    "style": "reveal",
+    "numFrames": 37,
+    "ticksPerStep": 2,
+    "fullLogoFrame": 18,
+    "previewDelay": 7,
+    "description": "progressive lambda reveal (rainbow)"
+  },
+  "white": {
+    "svg": "nixos-logo-white-flat-white-regular-vertical-recommended.svg",
+    "style": "reveal",
+    "numFrames": 37,
+    "ticksPerStep": 2,
+    "fullLogoFrame": 18,
+    "previewDelay": 7,
+    "description": "progressive lambda reveal (white)"
+  },
+  "spin": {
+    "svg": "nixos-logo-default-gradient-white-regular-vertical-recommended.svg",
+    "style": "spin",
+    "numFrames": 36,
+    "ticksPerStep": 1,
+    "fullLogoFrame": 0,
+    "previewDelay": 2,
+    "description": "spinning ASCII-art snowflake"
+  }
+}

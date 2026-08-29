@@ -1,6 +1,6 @@
 [Plymouth Theme]
 Name=NixOS Loading
-Description=NixOS boot splash with progressive lambda reveal
+Description=NixOS boot splash with @description@
 ModuleName=script
 
 [script]

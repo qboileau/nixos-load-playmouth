@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Test the NixOS Loading Plymouth theme using pre-rasterized PNGs from frames/.
-# Run ./generate-frames.py first to produce the PNGs.
+# Run ./generate-frames.py and ./generate-spin-frames.py first to produce them.
 #
-# By default cycles through all three variants (default, rainbow, white)
-# for 5 seconds each (15 seconds total).
+# By default cycles through every variant of variants.json, splitting the
+# total display time evenly between them.
 #
 # Prerequisites: run from a real TTY inside `nix develop`
 #
 # Usage (from within nix develop):
 #   sudo -E env PATH="$PATH" ./test-plymouth.sh [variant|all] [total-seconds]
 #
-# Variants: default, rainbow, white, all (defaults to "all")
+# Variants: any name in variants.json, or "all" (the default)
 # Seconds:  total display time across all variants (defaults to 15, max 60)
 #
 # Recovery if screen goes black:
@@ -22,13 +22,28 @@ set -euo pipefail
 VARIANT="${1:-all}"
 DURATION="${2:-15}"
 
+# Resolve repo root (where this script lives)
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# variants.json is the single source of truth for the variant list and for the
+# animation constants the Plymouth script is substituted with.
+variant_field() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]][sys.argv[3]])' \
+    "$REPO_DIR/variants.json" "$1" "$2"
+}
+
+mapfile -t ALL_VARIANTS < <(
+  python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))))' \
+    "$REPO_DIR/variants.json"
+)
+
 VARIANTS=()
 if [[ "$VARIANT" == "all" ]]; then
-  VARIANTS=(default rainbow white)
-elif [[ "$VARIANT" == "default" || "$VARIANT" == "rainbow" || "$VARIANT" == "white" ]]; then
+  VARIANTS=("${ALL_VARIANTS[@]}")
+elif printf '%s\n' "${ALL_VARIANTS[@]}" | grep -qx -- "$VARIANT"; then
   VARIANTS=("$VARIANT")
 else
-  echo "Error: unknown variant '$VARIANT'. Choose: default, rainbow, white, all"
+  echo "Error: unknown variant '$VARIANT'. Choose: ${ALL_VARIANTS[*]}, all"
   exit 1
 fi
 
@@ -47,11 +62,8 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
-# Resolve repo root (where this script lives)
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # Check dependencies
-for cmd in plymouthd plymouth; do
+for cmd in plymouthd plymouth python3; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "Error: '$cmd' not found. Run this from within 'nix develop'."
     exit 1
@@ -61,7 +73,11 @@ done
 # Verify frames exist for requested variants
 for v in "${VARIANTS[@]}"; do
   if [[ ! -d "$REPO_DIR/frames/$v" ]]; then
-    echo "Error: frames/$v/ not found. Run './generate-frames.py $v' first."
+    if [[ "$(variant_field "$v" style)" == "spin" ]]; then
+      echo "Error: frames/$v/ not found. Run './generate-spin-frames.py' first."
+    else
+      echo "Error: frames/$v/ not found. Run './generate-frames.py $v' first."
+    fi
     exit 1
   fi
 done
@@ -121,8 +137,13 @@ for v in "${VARIANTS[@]}"; do
   rm -rf "$TMPDIR_BUILD"/*
   cp "$REPO_DIR/frames/${v}/"*.png "$TMPDIR_BUILD/"
 
-  cp "$REPO_DIR/theme/nixos-loading.script" "$TMPDIR_BUILD/"
-  sed "s|@themedir@|$THEME_INSTALL_DIR|g" \
+  sed -e "s|@num_frames@|$(variant_field "$v" numFrames)|g" \
+      -e "s|@ticks_per_step@|$(variant_field "$v" ticksPerStep)|g" \
+      -e "s|@full_logo_frame@|$(variant_field "$v" fullLogoFrame)|g" \
+    "$REPO_DIR/theme/nixos-loading.script" \
+    > "$TMPDIR_BUILD/nixos-loading.script"
+  sed -e "s|@themedir@|$THEME_INSTALL_DIR|g" \
+      -e "s|@description@|$(variant_field "$v" description)|g" \
     "$REPO_DIR/theme/nixos-loading.plymouth" \
     > "$TMPDIR_BUILD/${THEME_NAME}.plymouth"
 

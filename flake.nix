@@ -1,5 +1,5 @@
 {
-  description = "NixOS Plymouth boot splash themes — progressive lambda reveal";
+  description = "NixOS Plymouth boot splash themes — progressive lambda reveal and spinning ASCII logo";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -7,34 +7,53 @@
 
   outputs = { self, nixpkgs }:
     let
-      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      lib = nixpkgs.lib;
 
-      # Source SVG filename for each variant
-      sourcesvgs = {
-        default = "nixos-logo-default-gradient-white-regular-vertical-recommended.svg";
-        rainbow = "nixos-logo-rainbow-gradient-white-regular-vertical-recommended.svg";
-        white   = "nixos-logo-white-flat-white-regular-vertical-recommended.svg";
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
+      forAllSystems = lib.genAttrs supportedSystems;
+
+      # Single source of truth for every variant: source SVG, animation style
+      # and the animation constants the Plymouth script is built with.
+      variants = builtins.fromJSON (builtins.readFile ./variants.json);
+      variantNames = builtins.attrNames variants;
+
+      # Just what the frame generators read, so frames/ stays out of the store.
+      generatorSrc = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./generate-frames.py
+          ./generate-spin-frames.py
+          ./variants.json
+          ./assets
+        ];
       };
 
-      # Build rasterized frames from a source SVG.
-      # Splits the logo into 6 individual lambda PNGs + text PNG.
+      # Build rasterized frames from a source SVG (for CI/regeneration).
+      # The committed frames/ PNGs are what the themes actually ship.
       mkFrames = pkgs: variant:
+        let
+          v = variants.${variant};
+          svg = "${generatorSrc}/assets/${v.svg}";
+        in
         pkgs.runCommand "nixos-loading-frames-${variant}" {
           nativeBuildInputs = [
             (pkgs.python3.withPackages (ps: [ ps.pillow ]))
             pkgs.librsvg
           ];
-        } ''
+        } (''
           mkdir -p "$out"
-          python3 ${./generate-frames.py} \
-            "${./assets}/${sourcesvgs.${variant}}" "$out"
-        '';
+        '' + (if v.style == "spin" then ''
+          export SPIN_FONT=${pkgs.dejavu_fonts}/share/fonts/truetype/DejaVuSansMono.ttf
+          python3 ${generatorSrc}/generate-spin-frames.py "${svg}" "$out"
+        '' else ''
+          python3 ${generatorSrc}/generate-frames.py "${svg}" "$out"
+        ''));
 
-      # Shared builder: takes a variant name ("default", "rainbow", "white")
-      # and produces a Plymouth theme derivation.
-      # Uses pre-rasterized PNGs from frames/ — no build-time SVG tooling.
+      # Shared builder: takes a variant name and produces a Plymouth theme
+      # derivation from the pre-rasterized PNGs in frames/ — no build-time
+      # SVG tooling.
       mkTheme = pkgs: variant:
+        let v = variants.${variant}; in
         pkgs.stdenv.mkDerivation {
           pname = "nixos-loading-plymouth-${variant}";
           version = "0.1.0";
@@ -52,29 +71,36 @@
             # Copy pre-rasterized PNGs
             cp frames/${variant}/*.png "$themedir/"
 
-            # Install Plymouth script
-            cp theme/nixos-loading.script "$themedir/"
+            # Install Plymouth script with the variant's animation constants
+            substitute theme/nixos-loading.script "$themedir/nixos-loading.script" \
+              --replace-fail '@num_frames@' '${toString v.numFrames}' \
+              --replace-fail '@ticks_per_step@' '${toString v.ticksPerStep}' \
+              --replace-fail '@full_logo_frame@' '${toString v.fullLogoFrame}'
 
             # Install .plymouth config with store path substituted
             substitute theme/nixos-loading.plymouth \
               "$themedir/nixos-loading-${variant}.plymouth" \
-              --replace-fail '@themedir@' "$themedir"
+              --replace-fail '@themedir@' "$themedir" \
+              --replace-fail '@description@' '${v.description}'
 
             runHook postInstall
           '';
 
           meta = with pkgs.lib; {
-            description = "NixOS Plymouth theme (${variant}) with progressive lambda reveal";
+            description = "NixOS Plymouth theme (${variant}) — ${v.description}";
             license = licenses.mit;
             platforms = platforms.linux;
           };
         };
 
-      # GIF preview builder for a variant
-      # Uses pre-composed animation frames directly — just composites
-      # each onto a dark background and assembles the GIF.
-      # Delay 7 = 70ms per frame (~TICKS_PER_STEP / 30fps).
+      # GIF preview builder for a variant. Uses the pre-composed animation
+      # frames directly — just composites each onto a dark background and
+      # assembles the GIF at the variant's animation speed.
       mkPreview = pkgs: variant:
+        let
+          v = variants.${variant};
+          last = toString (v.numFrames - 1);
+        in
         pkgs.runCommand "nixos-loading-preview-${variant}" {
           nativeBuildInputs = [ pkgs.imagemagick ];
         } ''
@@ -85,42 +111,37 @@
           H=700
 
           # Composite each animation frame onto a dark background
-          for f in $(seq 0 36); do
+          for f in $(seq 0 ${last}); do
             convert -size ''${W}x''${H} xc:"#191924" \
               ${./frames}/${variant}/frame-$f.png -gravity center -composite \
               work/frame-$f.png
           done
 
-          # Assemble animated GIF (70ms per frame, loop forever)
+          # Assemble animated GIF (loop forever)
           delays=""
-          for f in $(seq 0 36); do
-            delays="$delays -delay 7 work/frame-$f.png"
+          for f in $(seq 0 ${last}); do
+            delays="$delays -delay ${toString v.previewDelay} work/frame-$f.png"
           done
           convert $delays -loop 0 "$out/preview-${variant}.gif"
         '';
+
+      # { "<prefix><variant>" = builder pkgs variant; } for every variant
+      forAllVariants = pkgs: prefix: builder:
+        lib.genAttrs (map (n: "${prefix}${n}") variantNames)
+          (name: builder pkgs (lib.removePrefix prefix name));
     in
     {
       packages = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
-        {
-          nixos-loading-default = mkTheme pkgs "default";
-          nixos-loading-rainbow = mkTheme pkgs "rainbow";
-          nixos-loading-white   = mkTheme pkgs "white";
-
+        # Themes, rasterized frames (for CI/regeneration) and preview GIFs
+        forAllVariants pkgs "nixos-loading-" mkTheme
+        // forAllVariants pkgs "frames-" mkFrames
+        // forAllVariants pkgs "preview-" mkPreview
+        // {
           # Default package is the blue gradient variant
           default = mkTheme pkgs "default";
-
-          # Rasterized frames (for CI/regeneration)
-          frames-default = mkFrames pkgs "default";
-          frames-rainbow = mkFrames pkgs "rainbow";
-          frames-white   = mkFrames pkgs "white";
-
-          # Preview GIFs
-          preview-default = mkPreview pkgs "default";
-          preview-rainbow = mkPreview pkgs "rainbow";
-          preview-white   = mkPreview pkgs "white";
         }
       );
 
@@ -134,6 +155,8 @@
               (python3.withPackages (ps: [ ps.pillow ]))  # SVG splitting + frame compositing
               librsvg      # rsvg-convert for SVG → PNG rasterization
               imagemagick  # convert for GIF preview generation
+              dejavu_fonts # monospace face for the spin variant's ASCII art
+              fontconfig   # fc-match, how generate-spin-frames.py finds it
               plymouth     # local theme testing
             ];
           };
@@ -149,9 +172,9 @@
           options.boot.plymouth.nixos-loading = {
             enable = lib.mkEnableOption "NixOS loading Plymouth theme";
             variant = lib.mkOption {
-              type = lib.types.enum [ "default" "rainbow" "white" ];
+              type = lib.types.enum variantNames;
               default = "default";
-              description = "NixOS loading Plymouth theme color variant.";
+              description = "NixOS loading Plymouth theme variant.";
             };
           };
 
